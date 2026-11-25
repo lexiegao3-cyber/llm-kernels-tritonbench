@@ -1,0 +1,65 @@
+diff --git a/tritonbench/operators/inductor_residual_rmsnorm/operator.py b/tritonbench/operators/inductor_residual_rmsnorm/operator.py
+index 0bcfa8a..07be7fc 100644
+--- a/tritonbench/operators/inductor_residual_rmsnorm/operator.py
++++ b/tritonbench/operators/inductor_residual_rmsnorm/operator.py
+@@ -14,6 +14,10 @@ from tritonbench.utils.triton_op import (
+ with try_import("HAS_FLASHINFER"):
+     import flashinfer
+ 
++# Our own Triton kernels: pip install -e <path to llm-kernels-tritonbench>
++with try_import("HAS_LLM_KERNELS"):
++    import llm_kernels
++
+ 
+ torch._dynamo.config.automatic_dynamic_shapes = False
+ 
+@@ -107,6 +111,23 @@ class Operator(BenchmarkOperator):
+ 
+         return fn
+ 
++    @register_benchmark(enabled=HAS_LLM_KERNELS)
++    def llm_kernels_triton_fused_add_rmsnorm(
++        self,
++        x: torch.Tensor,
++        residual: torch.Tensor,
++        weight: torch.Tensor,
++    ) -> Callable:
++        # Same in-place semantics as flashinfer.fused_add_rmsnorm.
++        x_buf, r_buf = x.clone(), residual.clone()
++        eps = self.eps
++
++        def fn():
++            llm_kernels.fused_add_rmsnorm(x_buf, r_buf, weight, eps)
++            return x_buf
++
++        return fn
++
+     @register_metric()
+     def gbps(
+         self, fn_name: str, example_inputs: Tuple, metrics: BenchmarkOperatorMetrics
+diff --git a/tritonbench/operators/rms_norm/operator.py b/tritonbench/operators/rms_norm/operator.py
+index 0fe1ea7..ba25545 100644
+--- a/tritonbench/operators/rms_norm/operator.py
++++ b/tritonbench/operators/rms_norm/operator.py
+@@ -36,6 +36,10 @@ with try_import("HAS_TILELANG"):
+ with try_import("HAS_FLASHINFER"):
+     import flashinfer
+ 
++# Our own Triton kernels: pip install -e <path to llm-kernels-tritonbench>
++with try_import("HAS_LLM_KERNELS"):
++    import llm_kernels
++
+ try:
+     from tritonbench.kernels.int21 import rms_norm as int21_rms_norm
+ 
+@@ -175,6 +179,10 @@ class Operator(BenchmarkOperator):
+         # Forward-only CUDA kernel; expects a 2D (or 3D) contiguous input.
+         return lambda: flashinfer.rmsnorm(input, weight, eps=self.eps)
+ 
++    @register_benchmark(enabled=HAS_LLM_KERNELS, fwd_only=True)
++    def llm_kernels_triton_rms(self, H, input, weight) -> Callable:
++        return lambda: llm_kernels.rmsnorm(input, weight, eps=self.eps)
++
+     @register_benchmark(enabled=HAS_TILELANG)
+     def tilelang(self, H, input, weight) -> Callable:
+         module = TileLangRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
